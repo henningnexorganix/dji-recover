@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dji-recover"
+version = "0.1.0"
+description = "Recover HEVC video from crashed DJI MP4 files that are missing a moov atom."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Henning and contributors" }]
+keywords = ["dji", "mp4", "hevc", "recovery", "moov"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Video",
+]
+
+[project.scripts]
+dji-recover = "dji_recover.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

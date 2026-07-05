@@ -1,0 +1,18 @@
+/.pycache/
+/.pytest_cache/
+/.venv/
+/*.egg-info/
+/build/
+/dist/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Recovery intermediates can be very large.
+/Downloads/
+*.MP4
+*.mp4
+*.hevc
+*.h264
+*.aac
+*.m4a
