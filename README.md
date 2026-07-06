@@ -67,6 +67,15 @@ After installation, the CLI is available as:
 dji-recover --help
 ```
 
+The command is `dji-recover`, not `dji-recovery`. If your shell says
+`command not found`, check that the virtual environment is active:
+
+```sh
+source .venv/bin/activate
+which dji-recover
+dji-recover --help
+```
+
 You can also run it directly from the source tree:
 
 ```sh
