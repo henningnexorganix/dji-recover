@@ -10,7 +10,7 @@ from . import __version__
 from .audio import recover_dji_aac_adts
 from .ffmpeg import ffprobe_json, mux_hevc_to_mp4, transcode_audio_to_m4a, try_extract_audio
 from .hevc import extract_parameter_sets
-from .recover import parse_offset, recover_hevc_annexb
+from .recover import RecoveryError, parse_offset, recover_hevc_annexb
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,6 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not broken.exists():
         print(f"Broken file does not exist: {broken}", file=sys.stderr)
+        return 2
+    if not _validate_input_file(reference, "Reference"):
+        return 2
+    if not _validate_input_file(broken, "Broken"):
         return 2
 
     if args.keep_workdir:
@@ -143,9 +147,33 @@ def main(argv: list[str] | None = None) -> int:
         mux_hevc_to_mp4(hevc_path, output, frame_rate=args.frame_rate, mode=mode, audio=audio)
         print(f"Recovered MP4: {output}", file=sys.stderr)
         return 0
+    except RecoveryError as exc:
+        print(f"Recovery failed: {exc}", file=sys.stderr)
+        return 2
     finally:
         if cleanup:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _validate_input_file(path: Path, label: str) -> bool:
+    if not path.is_file():
+        print(f"{label} path is not a file: {path}", file=sys.stderr)
+        return False
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        print(f"{label} file cannot be inspected: {path}: {exc}", file=sys.stderr)
+        return False
+    if size == 0:
+        print(f"{label} file is empty (0 bytes): {path}", file=sys.stderr)
+        return False
+    try:
+        with path.open("rb") as handle:
+            handle.read(1)
+    except OSError as exc:
+        print(f"{label} file cannot be read: {path}: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def _print_reference_summary(reference: Path) -> None:

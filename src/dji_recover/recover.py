@@ -10,6 +10,10 @@ DJI_HEVC_TYPES = {1, 19, 20, 32, 33, 34}
 DJI_SLICE_HEADERS = {b"\x02\x01", b"\x26\x01", b"\x28\x01"}
 
 
+class RecoveryError(RuntimeError):
+    """Raised for expected recovery failures that should be shown without a traceback."""
+
+
 @dataclass
 class NalRange:
     offset: int
@@ -42,7 +46,9 @@ def parse_offset(value: str | int | None) -> int | None:
 
 
 def find_hevc_start(path: Path, max_scan: int | None, max_nal_size: int) -> int:
-    size = path.stat().st_size
+    size = _file_size(path)
+    if size == 0:
+        raise RecoveryError(f"Broken file is empty (0 bytes): {path}")
     limit = min(size, max_scan) if max_scan else size
     indexed_start = _find_indexed_hevc_start(path, limit, max_nal_size, min_count=4)
     if indexed_start is not None:
@@ -77,7 +83,10 @@ def find_hevc_start(path: Path, max_scan: int | None, max_nal_size: int) -> int:
 def _find_indexed_hevc_start(path: Path, limit: int, max_nal_size: int, min_count: int) -> int | None:
     max_gap = max(2 * 1024 * 1024, max_nal_size * 4)
     with path.open("rb") as handle:
-        data = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            data = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+        except (OSError, ValueError) as exc:
+            raise RecoveryError(f"Could not memory-map broken file: {path}: {exc}") from exc
         try:
             search_limit = min(limit, len(data))
             pos = 4
@@ -144,11 +153,16 @@ def _recover_hevc_annexb_indexed(
     stats: RecoveryStats,
     frame_filter: str,
 ) -> RecoveryStats:
-    file_size = broken.stat().st_size
+    file_size = _file_size(broken)
+    if file_size == 0:
+        raise RecoveryError(f"Broken file is empty (0 bytes): {broken}")
     last_end = start_offset
     frame: list[tuple[NalRange, bytes]] = []
     with broken.open("rb") as src, output_hevc.open("wb") as dst:
-        data = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            data = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
+        except (OSError, ValueError) as exc:
+            raise RecoveryError(f"Could not memory-map broken file: {broken}: {exc}") from exc
         try:
             dst.write(parameter_sets.as_annexb())
 
@@ -238,6 +252,13 @@ def _first_slice_segment(payload: bytes) -> bool:
     return len(payload) > 2 and bool(payload[2] & 0x80)
 
 
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError as exc:
+        raise RecoveryError(f"Could not inspect broken file: {path}: {exc}") from exc
+
+
 def _recover_hevc_annexb_online(
     broken: Path,
     output_hevc: Path,
@@ -246,7 +267,9 @@ def _recover_hevc_annexb_online(
     max_nal_size: int,
     stats: RecoveryStats,
 ) -> RecoveryStats:
-    file_size = broken.stat().st_size
+    file_size = _file_size(broken)
+    if file_size == 0:
+        raise RecoveryError(f"Broken file is empty (0 bytes): {broken}")
     with broken.open("rb") as src, output_hevc.open("wb") as dst:
         src.seek(start_offset)
         dst.write(parameter_sets.as_annexb())

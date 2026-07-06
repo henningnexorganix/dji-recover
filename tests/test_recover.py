@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 from pathlib import Path
 import tempfile
@@ -8,7 +8,7 @@ from dji_recover import __version__
 from dji_recover.cli import main
 from dji_recover.hevc import START_CODE, ParameterSets
 from dji_recover.audio import recover_dji_aac_adts
-from dji_recover.recover import find_hevc_start, recover_hevc_annexb
+from dji_recover.recover import RecoveryError, find_hevc_start, recover_hevc_annexb
 
 
 def nal(nal_type: int, body: bytes = b"payload") -> bytes:
@@ -34,6 +34,30 @@ class RecoverTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(stdout.getvalue().strip(), f"dji-recover {__version__}")
+
+    def test_cli_rejects_empty_broken_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            reference = tmp_path / "reference.mp4"
+            broken = tmp_path / "empty.mp4"
+            output = tmp_path / "out.mp4"
+            reference.write_bytes(b"not empty")
+            broken.write_bytes(b"")
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                code = main(["--reference", str(reference), "--broken", str(broken), "--output", str(output)])
+
+            self.assertEqual(code, 2)
+            self.assertIn("Broken file is empty (0 bytes)", stderr.getvalue())
+
+    def test_find_hevc_start_rejects_empty_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = Path(tmp) / "empty.mp4"
+            broken.write_bytes(b"")
+
+            with self.assertRaisesRegex(RecoveryError, "empty"):
+                find_hevc_start(broken, max_scan=None, max_nal_size=1024)
 
     def test_recover_resyncs_after_bad_word(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
