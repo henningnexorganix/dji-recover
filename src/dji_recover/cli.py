@@ -261,7 +261,7 @@ def _resolve_audio(
         if audio_stats.guessed_ratio >= 0.25:
             print(
                 "Warning: many recovered AAC frames were inferred from DJI gap boundaries; "
-                "if speech sounds bubbly, retry with --audio-recovery exact.",
+                "--audio-recovery exact can diagnose this but may make audio much shorter.",
                 file=sys.stderr,
             )
         return _prepare_audio(adts, workdir, audio_mode)

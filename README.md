@@ -200,9 +200,10 @@ dji-recover \
 ```
 
 DJI AAC recovery has two scan modes. The default, `--audio-recovery guess`,
-includes plausible final AAC frames found at the end of DJI video gaps. This
-usually recovers more complete audio, but heavily damaged files may sound bubbly
-if some inferred frames are not really clean AAC. For stricter audio, use:
+includes plausible final AAC frames found at the end of DJI video gaps. This is
+usually the right mode for DJI Osmo Action 4 files because many real AAC frames
+are the final frame in an interleaved video gap. For diagnostic output that keeps
+only frames whose size is confirmed by the next AAC signature, use:
 
 ```sh
 dji-recover \
@@ -212,10 +213,10 @@ dji-recover \
   --audio-recovery exact
 ```
 
-By default, `--audio-sync pad` extends recovered audio with silence when it is a
-little shorter than the recovered video, so the final MP4 has matching stream
-durations. Use `--audio-sync shortest` to trim the output to the shorter stream
-instead.
+`exact` can make the audio much shorter. By default, `--audio-sync pad` extends
+recovered audio with silence when it is shorter than the recovered video, so the
+final MP4 has matching stream durations. Use `--audio-sync shortest` to trim the
+output to the shorter stream instead.
 
 ## Useful Options
 

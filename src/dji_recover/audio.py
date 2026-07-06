@@ -24,6 +24,7 @@ AAC_SAMPLE_RATE_INDEX = {
 }
 DJI_AAC_SIGNATURE = b"\x21\x1b\x94"
 DJI_AAC_FRAME_SIZES = (846, 847)
+DJI_BLOCK_MARKER_BYTES = {0x1A, 0x21}
 
 
 @dataclass
@@ -80,7 +81,12 @@ def recover_dji_aac_adts(
 
                 stats.regions_scanned += 1
                 stats.candidate_signatures += len(signatures)
-                frame_ranges = _aac_frame_ranges(signatures, gap_end, guess_final_frames=guess_final_frames)
+                frame_ranges = _aac_frame_ranges(
+                    data,
+                    signatures,
+                    gap_end,
+                    guess_final_frames=guess_final_frames,
+                )
                 for start, end, guessed in frame_ranges:
                     payload = data[start:end]
                     if not payload.startswith(DJI_AAC_SIGNATURE):
@@ -111,6 +117,7 @@ def _find_signatures(data: mmap.mmap, start: int, end: int) -> list[int]:
 
 
 def _aac_frame_ranges(
+    data: mmap.mmap | bytes,
     signatures: list[int],
     region_end: int,
     guess_final_frames: bool = True,
@@ -125,14 +132,23 @@ def _aac_frame_ranges(
         return ranges
 
     last = signatures[-1]
-    guessed_size = _guess_final_frame_size(last, region_end)
+    guessed_size = _guess_final_frame_size(data, last, region_end)
     if guessed_size is not None:
         ranges.append((last, last + guessed_size, True))
     return ranges
 
 
-def _guess_final_frame_size(start: int, region_end: int) -> int | None:
+def _guess_final_frame_size(data: mmap.mmap | bytes, start: int, region_end: int) -> int | None:
     space = region_end - start
+    for size in reversed(DJI_AAC_FRAME_SIZES):
+        marker_pos = start + size
+        if space > size and marker_pos < len(data) and data[marker_pos] in DJI_BLOCK_MARKER_BYTES:
+            return size
+
+    for size in reversed(DJI_AAC_FRAME_SIZES):
+        if space == size:
+            return size
+
     for size in DJI_AAC_FRAME_SIZES:
         if space >= size:
             return size

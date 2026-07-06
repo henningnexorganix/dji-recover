@@ -118,7 +118,7 @@ class RecoverTests(unittest.TestCase):
                 length_prefixed(first)
                 + audio_frame_a
                 + audio_frame_b
-                + b"\x00\x00\x00\x00"
+                + b"\x1a\x00\x00\x00"
                 + length_prefixed(second)
             )
 
@@ -132,6 +132,7 @@ class RecoverTests(unittest.TestCase):
             self.assertEqual(audio_stats.exact_frames, 1)
             self.assertEqual(audio_stats.guessed_last_frames, 1)
             self.assertEqual(data.count(b"\xff\xf1"), 2)
+            self.assertIn(b"b" * 844, data)
 
     def test_recover_dji_aac_can_disable_guessed_gap_frames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -145,7 +146,7 @@ class RecoverTests(unittest.TestCase):
                 length_prefixed(first)
                 + audio_frame_a
                 + audio_frame_b
-                + b"\x00\x00\x00\x00"
+                + b"\x1a\x00\x00\x00"
                 + length_prefixed(second)
             )
 
