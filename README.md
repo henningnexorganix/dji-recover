@@ -164,6 +164,18 @@ For badly damaged streams, `--hevc-aud on` inserts HEVC access-unit delimiters
 before recovered frames, and `--gop-start next-idr` skips the first detected GOP
 and starts at the next IDR frame.
 
+To inspect badly damaged output, write a GOP/keyframe quality report:
+
+```sh
+dji-recover \
+  --reference good.MP4 \
+  --broken broken.MP4 \
+  --output recovered-clean.mp4 \
+  --timeline clean \
+  --gop-report report.json \
+  --gop-samples-dir gop-samples
+```
+
 ## Audio Recovery
 
 Audio recovery is best effort.
@@ -236,6 +248,8 @@ output to the shorter stream instead.
 --frame-filter MODE    auto, none, complete, pairs, or header-pairs
 --hevc-aud MODE        auto, on, or off
 --gop-start MODE       first or next-idr
+--gop-report PATH      Write a JSON quality report for recovered GOP starts
+--gop-samples-dir PATH Save JPEG keyframe samples for the GOP report
 --audio MODE           auto or none
 --audio-mode MODE      transcode or copy
 --audio-recovery MODE  guess or exact

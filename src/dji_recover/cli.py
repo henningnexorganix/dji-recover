@@ -10,6 +10,7 @@ from . import __version__
 from .audio import recover_dji_aac_adts
 from .ffmpeg import ffprobe_json, mux_hevc_to_mp4, transcode_audio_to_m4a, try_extract_audio
 from .hevc import extract_parameter_sets
+from .quality import inspect_gops
 from .recover import RecoveryError, parse_offset, recover_hevc_annexb
 
 
@@ -79,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--audio-source", type=Path, help="Optional AAC/M4A/WAV file to mux into the recovered MP4")
     parser.add_argument("--keep-workdir", type=Path, help="Keep intermediate files in this directory")
+    parser.add_argument("--gop-report", type=Path, help="Write a JSON quality report for recovered keyframes/GOP starts")
+    parser.add_argument("--gop-samples-dir", type=Path, help="Directory for JPEG samples referenced by --gop-report")
+    parser.add_argument(
+        "--gop-report-limit",
+        type=int,
+        default=200,
+        help="Maximum keyframes to inspect for --gop-report; use 0 for all",
+    )
     parser.add_argument("--max-scan", default=None, help="Auto-detect scan limit in bytes, decimal or hex")
     parser.add_argument("--max-nal-size", default="0x80000", help="Maximum plausible NAL size")
     return parser
@@ -185,6 +194,21 @@ def main(argv: list[str] | None = None) -> int:
             audio_sync=args.audio_sync,
         )
         print(f"Recovered MP4: {output}", file=sys.stderr)
+        if args.gop_report:
+            report = args.gop_report.expanduser().resolve()
+            samples_dir = args.gop_samples_dir.expanduser().resolve() if args.gop_samples_dir else None
+            print("Inspecting recovered GOP/keyframe quality...", file=sys.stderr)
+            samples = inspect_gops(
+                output,
+                report,
+                samples_dir=samples_dir,
+                limit=max(0, args.gop_report_limit),
+            )
+            worst = sorted(samples, key=lambda sample: sample.green_ratio, reverse=True)[:5]
+            print(f"GOP quality report: {report}", file=sys.stderr)
+            if worst:
+                summary = ", ".join(f"{sample.time_seconds:.2f}s={sample.green_ratio:.1%}" for sample in worst)
+                print(f"Worst green ratios: {summary}", file=sys.stderr)
         return 0
     except RecoveryError as exc:
         print(f"Recovery failed: {exc}", file=sys.stderr)

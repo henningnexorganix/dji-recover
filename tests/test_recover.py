@@ -7,6 +7,7 @@ import unittest
 from dji_recover import __version__
 from dji_recover.cli import main
 from dji_recover.hevc import HEVC_AUD, START_CODE, ParameterSets, PpsInfo, SpsInfo, parse_slice_info
+from dji_recover.quality import _dark_ratio, _green_ratio
 from dji_recover.audio import recover_dji_aac_adts
 from dji_recover.recover import NalRange, RecoveryError, find_hevc_start, recover_hevc_annexb
 
@@ -267,6 +268,24 @@ class RecoverTests(unittest.TestCase):
         self.assertFalse(second.first_slice_segment)
         self.assertEqual(second.slice_segment_address, 42)
         self.assertEqual(second.poc_lsb, 37)
+
+    def test_quality_ratios_detect_green_and_dark_pixels(self) -> None:
+        rgb = bytes(
+            [
+                0,
+                180,
+                0,
+                10,
+                10,
+                10,
+                100,
+                100,
+                100,
+            ]
+        )
+
+        self.assertAlmostEqual(_green_ratio(rgb), 1 / 3)
+        self.assertAlmostEqual(_dark_ratio(rgb), 1 / 3)
 
     def test_recover_can_skip_to_next_idr_gop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
