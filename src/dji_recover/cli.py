@@ -42,6 +42,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filter recovered HEVC access units. auto uses pairs for clean and none for preserve.",
     )
     parser.add_argument(
+        "--hevc-aud",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Insert HEVC access unit delimiters. auto enables them for clean output.",
+    )
+    parser.add_argument(
+        "--gop-start",
+        choices=["first", "next-idr"],
+        default="first",
+        help="Start recovered video at the first detected GOP or skip to the next IDR GOP.",
+    )
+    parser.add_argument(
         "--audio",
         choices=["auto", "none"],
         default="auto",
@@ -116,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         frame_filter = args.frame_filter
         if frame_filter == "auto":
             frame_filter = "pairs" if args.timeline == "clean" else "none"
+        insert_aud = args.hevc_aud == "on" or (args.hevc_aud == "auto" and args.timeline == "clean")
         print("Recovering length-prefixed HEVC NAL units...", file=sys.stderr)
         stats = recover_hevc_annexb(
             broken=broken,
@@ -125,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
             max_scan=parse_offset(args.max_scan),
             max_nal_size=parse_offset(args.max_nal_size) or 512 * 1024,
             frame_filter=frame_filter,
+            insert_aud=insert_aud,
+            gop_start=args.gop_start,
         )
         print(
             f"Recovered {stats.nals_written} NAL units from 0x{stats.start_offset:x}; "
@@ -138,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"frames_written={stats.frames_written}, frames_dropped={stats.frames_dropped}",
                 file=sys.stderr,
             )
+        if insert_aud:
+            print("Inserted HEVC access unit delimiters.", file=sys.stderr)
+        if args.gop_start == "next-idr":
+            print("Started video at the next detected IDR GOP.", file=sys.stderr)
 
         audio = _resolve_audio(
             audio_source=args.audio_source,

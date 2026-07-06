@@ -6,7 +6,7 @@ import unittest
 
 from dji_recover import __version__
 from dji_recover.cli import main
-from dji_recover.hevc import START_CODE, ParameterSets
+from dji_recover.hevc import HEVC_AUD, START_CODE, ParameterSets
 from dji_recover.audio import recover_dji_aac_adts
 from dji_recover.recover import NalRange, RecoveryError, find_hevc_start, recover_hevc_annexb
 
@@ -206,6 +206,64 @@ class RecoverTests(unittest.TestCase):
             self.assertIn(b"complete-b", data)
             self.assertNotIn(b"orphan-continuation", data)
             self.assertNotIn(b"orphan-first", data)
+
+    def test_recover_can_insert_hevc_aud_per_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            params = ParameterSets(vps=nal(32), sps=nal(33), pps=nal(34))
+            frame_a = [slice_nal(19, True, b"a1"), slice_nal(19, False, b"a2")]
+            frame_b = [slice_nal(1, True, b"b1"), slice_nal(1, False, b"b2")]
+            broken = tmp_path / "broken.mp4"
+            broken.write_bytes(b"".join(length_prefixed(unit) for unit in frame_a + frame_b))
+
+            out = tmp_path / "out.hevc"
+            stats = recover_hevc_annexb(
+                broken,
+                out,
+                params,
+                start_offset=0,
+                max_nal_size=1024,
+                frame_filter="pairs",
+                insert_aud=True,
+            )
+
+            data = out.read_bytes()
+            self.assertEqual(stats.frames_written, 2)
+            self.assertEqual(data.count(START_CODE + HEVC_AUD), 2)
+
+    def test_recover_can_skip_to_next_idr_gop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            params = ParameterSets(vps=nal(32), sps=nal(33), pps=nal(34))
+            first_gop = [
+                slice_nal(19, True, b"first-idr-a"),
+                slice_nal(19, False, b"first-idr-b"),
+                slice_nal(1, True, b"first-p-a"),
+                slice_nal(1, False, b"first-p-b"),
+            ]
+            second_gop = [
+                slice_nal(19, True, b"second-idr-a"),
+                slice_nal(19, False, b"second-idr-b"),
+            ]
+            broken = tmp_path / "broken.mp4"
+            broken.write_bytes(b"".join(length_prefixed(unit) for unit in first_gop + second_gop))
+
+            out = tmp_path / "out.hevc"
+            stats = recover_hevc_annexb(
+                broken,
+                out,
+                params,
+                start_offset=0,
+                max_nal_size=1024,
+                frame_filter="pairs",
+                gop_start="next-idr",
+            )
+
+            data = out.read_bytes()
+            self.assertEqual(stats.frames_written, 1)
+            self.assertNotIn(b"first-idr-a", data)
+            self.assertNotIn(b"first-p-a", data)
+            self.assertIn(b"second-idr-a", data)
 
 
 if __name__ == "__main__":

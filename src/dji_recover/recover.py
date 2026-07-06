@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import mmap
 from pathlib import Path
 
-from .hevc import PARAMETER_SET_TYPES, START_CODE, ParameterSets, hevc_nal_type, looks_like_hevc_nal
+from .hevc import HEVC_AUD, PARAMETER_SET_TYPES, START_CODE, ParameterSets, hevc_nal_type, looks_like_hevc_nal
 
 DJI_HEVC_TYPES = {1, 19, 20, 32, 33, 34}
 DJI_SLICE_HEADERS = {b"\x02\x01", b"\x26\x01", b"\x28\x01"}
@@ -128,6 +128,8 @@ def recover_hevc_annexb(
     max_scan: int | None = None,
     max_nal_size: int = 512 * 1024,
     frame_filter: str = "none",
+    insert_aud: bool = False,
+    gop_start: str = "first",
 ) -> RecoveryStats:
     if start_offset is None:
         start_offset = find_hevc_start(broken, max_scan=max_scan, max_nal_size=max_nal_size)
@@ -141,6 +143,8 @@ def recover_hevc_annexb(
         max_nal_size,
         stats,
         frame_filter,
+        insert_aud,
+        gop_start,
     )
 
 
@@ -152,12 +156,16 @@ def _recover_hevc_annexb_indexed(
     max_nal_size: int,
     stats: RecoveryStats,
     frame_filter: str,
+    insert_aud: bool,
+    gop_start: str,
 ) -> RecoveryStats:
     file_size = _file_size(broken)
     if file_size == 0:
         raise RecoveryError(f"Broken file is empty (0 bytes): {broken}")
     last_end = start_offset
     frame: list[tuple[NalRange, bytes]] = []
+    accepting_frames = gop_start != "next-idr"
+    idr_frames_seen = 0
     with broken.open("rb") as src, output_hevc.open("wb") as dst:
         try:
             data = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
@@ -171,7 +179,7 @@ def _recover_hevc_annexb_indexed(
                 if not frame:
                     return
                 if _keep_frame(frame, frame_filter):
-                    _write_frame(dst, frame, stats)
+                    _write_frame(dst, frame, stats, insert_aud=insert_aud)
                 else:
                     stats.frames_dropped += 1
                 frame = []
@@ -201,11 +209,19 @@ def _recover_hevc_annexb_indexed(
 
                 stats.bytes_scanned = candidate - start_offset
                 if frame_filter == "none":
-                    _write_frame(dst, [(nal_range, payload)], stats)
+                    _write_frame(dst, [(nal_range, payload)], stats, insert_aud=False)
                 else:
                     first_slice = _first_slice_segment(payload)
                     if first_slice:
                         flush_frame()
+                        if nal_type in {19, 20}:
+                            idr_frames_seen += 1
+                            if gop_start == "next-idr" and idr_frames_seen >= 2:
+                                accepting_frames = True
+                        if not accepting_frames:
+                            stats.frames_dropped += 1
+                            last_end = payload_end
+                            continue
                         frame.append((nal_range, payload))
                     elif frame:
                         if frame_filter == "pairs" and len(frame) >= 2:
@@ -223,7 +239,15 @@ def _recover_hevc_annexb_indexed(
     return stats
 
 
-def _write_frame(dst, frame: list[tuple[NalRange, bytes]], stats: RecoveryStats) -> None:
+def _write_frame(
+    dst,
+    frame: list[tuple[NalRange, bytes]],
+    stats: RecoveryStats,
+    insert_aud: bool = False,
+) -> None:
+    if insert_aud:
+        dst.write(START_CODE)
+        dst.write(HEVC_AUD)
     for nal_range, payload in frame:
         dst.write(START_CODE)
         dst.write(payload)

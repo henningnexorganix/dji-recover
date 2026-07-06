@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 
 START_CODE = b"\x00\x00\x00\x01"
+HEVC_AUD = b"\x46\x01\x50"
 PARAMETER_SET_TYPES = {32, 33, 34}
 COMMON_HEVC_TYPES = set(range(0, 32)) | {32, 33, 34, 35, 39, 40}
 
