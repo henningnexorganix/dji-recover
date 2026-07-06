@@ -6,8 +6,17 @@ import subprocess
 import tempfile
 
 
-def run(cmd: list[str]) -> None:
-    subprocess.run(cmd, check=True)
+def run(cmd: list[str], quiet: bool = False) -> None:
+    if not quiet:
+        subprocess.run(cmd, check=True)
+        return
+
+    result = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode == 0:
+        return
+
+    tail = "\n".join(result.stderr.splitlines()[-25:])
+    raise RuntimeError(f"Command failed with exit code {result.returncode}:\n{tail}")
 
 
 def ffprobe_json(path: Path) -> dict:
@@ -63,7 +72,8 @@ def mux_hevc_to_mp4(
                     "-movflags",
                     "+faststart",
                     str(output),
-                ]
+                ],
+                quiet=mode == "reencode",
             )
         return
 
@@ -92,7 +102,7 @@ def mux_hevc_to_mp4(
 
     cmd = base + ["-map", "0:v:0"]
     cmd += video_args + ["-movflags", "+faststart", str(output)]
-    run(cmd)
+    run(cmd, quiet=mode == "reencode")
 
 
 def transcode_audio_to_m4a(source: Path, output: Path, bitrate: str = "320k") -> bool:

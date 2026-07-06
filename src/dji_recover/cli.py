@@ -36,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Video mode. Defaults to HEVC copy for preserve and H.264 reencode for clean.",
     )
     parser.add_argument(
+        "--frame-filter",
+        choices=["auto", "none", "complete", "pairs"],
+        default="auto",
+        help="Filter recovered HEVC access units. auto uses pairs for clean and none for preserve.",
+    )
+    parser.add_argument(
         "--audio",
         choices=["auto", "none"],
         default="auto",
@@ -91,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         hevc_path = workdir / "recovered.hevc"
+        frame_filter = args.frame_filter
+        if frame_filter == "auto":
+            frame_filter = "pairs" if args.timeline == "clean" else "none"
         print("Recovering length-prefixed HEVC NAL units...", file=sys.stderr)
         stats = recover_hevc_annexb(
             broken=broken,
@@ -99,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             start_offset=parse_offset(args.start_offset),
             max_scan=parse_offset(args.max_scan),
             max_nal_size=parse_offset(args.max_nal_size) or 512 * 1024,
+            frame_filter=frame_filter,
         )
         print(
             f"Recovered {stats.nals_written} NAL units from 0x{stats.start_offset:x}; "
@@ -106,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
             f"last_input_offset=0x{stats.last_output_offset:x}",
             file=sys.stderr,
         )
+        if frame_filter != "none":
+            print(
+                f"Frame filter: {frame_filter}; "
+                f"frames_written={stats.frames_written}, frames_dropped={stats.frames_dropped}",
+                file=sys.stderr,
+            )
 
         audio = _resolve_audio(
             audio_source=args.audio_source,

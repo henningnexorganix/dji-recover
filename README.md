@@ -143,7 +143,9 @@ dji-recover \
 `clean` decodes the recovered HEVC stream, writes H.264 video, and transcodes
 recovered audio. It is slower and loses one generation of quality, but often
 creates a much friendlier file for QuickTime, DaVinci Resolve, and other players
-when the raw recovered HEVC stream is damaged.
+when the raw recovered HEVC stream is damaged. By default, `clean` also applies
+a stricter DJI frame-pair filter before transcoding, which drops incomplete video
+frames that can otherwise make decoders blend unrelated damaged scenes.
 
 ```sh
 dji-recover \
@@ -155,6 +157,7 @@ dji-recover \
 
 Lower-level video behavior can be overridden with `--mode copy|reencode`.
 `preserve` defaults to HEVC `copy`; `clean` defaults to H.264 `reencode`.
+The access-unit filter can be overridden with `--frame-filter auto|none|complete|pairs`.
 
 ## Audio Recovery
 
@@ -206,6 +209,7 @@ dji-recover \
 --frame-rate RATE      Frame rate for raw HEVC timestamps
 --timeline MODE        preserve or clean
 --mode MODE            copy or reencode
+--frame-filter MODE    auto, none, complete, or pairs
 --audio MODE           auto or none
 --audio-mode MODE      transcode or copy
 --audio-source PATH    External audio file to mux

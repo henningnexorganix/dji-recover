@@ -24,6 +24,8 @@ class RecoveryStats:
     start_offset: int
     bytes_scanned: int = 0
     nals_written: int = 0
+    frames_written: int = 0
+    frames_dropped: int = 0
     parameter_sets_skipped: int = 0
     resyncs: int = 0
     invalid_words: int = 0
@@ -116,12 +118,21 @@ def recover_hevc_annexb(
     start_offset: int | None = None,
     max_scan: int | None = None,
     max_nal_size: int = 512 * 1024,
+    frame_filter: str = "none",
 ) -> RecoveryStats:
     if start_offset is None:
         start_offset = find_hevc_start(broken, max_scan=max_scan, max_nal_size=max_nal_size)
 
     stats = RecoveryStats(start_offset=start_offset)
-    return _recover_hevc_annexb_indexed(broken, output_hevc, parameter_sets, start_offset, max_nal_size, stats)
+    return _recover_hevc_annexb_indexed(
+        broken,
+        output_hevc,
+        parameter_sets,
+        start_offset,
+        max_nal_size,
+        stats,
+        frame_filter,
+    )
 
 
 def _recover_hevc_annexb_indexed(
@@ -131,13 +142,26 @@ def _recover_hevc_annexb_indexed(
     start_offset: int,
     max_nal_size: int,
     stats: RecoveryStats,
+    frame_filter: str,
 ) -> RecoveryStats:
     file_size = broken.stat().st_size
     last_end = start_offset
+    frame: list[tuple[NalRange, bytes]] = []
     with broken.open("rb") as src, output_hevc.open("wb") as dst:
         data = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
         try:
             dst.write(parameter_sets.as_annexb())
+
+            def flush_frame() -> None:
+                nonlocal frame
+                if not frame:
+                    return
+                if _keep_frame(frame, frame_filter):
+                    _write_frame(dst, frame, stats)
+                else:
+                    stats.frames_dropped += 1
+                frame = []
+
             pos = start_offset + 4
             while pos < file_size - 6:
                 hit = _find_next_slice_header(data, pos)
@@ -161,26 +185,57 @@ def _recover_hevc_annexb_indexed(
                     last_end = payload_end
                     continue
 
-                dst.write(START_CODE)
-                dst.write(payload)
-                stats.nals_written += 1
-                stats.largest_nal = max(stats.largest_nal, nal_size)
-                stats.last_output_offset = candidate
                 stats.bytes_scanned = candidate - start_offset
-                stats.video_ranges.append(
-                    NalRange(
-                        offset=candidate,
-                        payload_start=nal_range.payload_start,
-                        payload_end=payload_end,
-                        nal_size=nal_size,
-                        nal_type=nal_type,
-                    )
-                )
+                if frame_filter == "none":
+                    _write_frame(dst, [(nal_range, payload)], stats)
+                else:
+                    first_slice = _first_slice_segment(payload)
+                    if first_slice:
+                        flush_frame()
+                        frame.append((nal_range, payload))
+                    elif frame:
+                        if frame_filter == "pairs" and len(frame) >= 2:
+                            flush_frame()
+                            stats.frames_dropped += 1
+                        else:
+                            frame.append((nal_range, payload))
+                    else:
+                        stats.frames_dropped += 1
                 last_end = payload_end
+            flush_frame()
         finally:
             data.close()
 
     return stats
+
+
+def _write_frame(dst, frame: list[tuple[NalRange, bytes]], stats: RecoveryStats) -> None:
+    for nal_range, payload in frame:
+        dst.write(START_CODE)
+        dst.write(payload)
+        stats.nals_written += 1
+        stats.largest_nal = max(stats.largest_nal, nal_range.nal_size)
+        stats.last_output_offset = nal_range.offset
+        stats.video_ranges.append(nal_range)
+    stats.frames_written += 1
+
+
+def _keep_frame(frame: list[tuple[NalRange, bytes]], frame_filter: str) -> bool:
+    if frame_filter == "none":
+        return True
+    if not frame or not _first_slice_segment(frame[0][1]):
+        return False
+    if any(_first_slice_segment(payload) for _, payload in frame[1:]):
+        return False
+    if frame_filter == "pairs":
+        return len(frame) == 2
+    if frame_filter == "complete":
+        return True
+    raise ValueError(f"Unknown frame filter: {frame_filter}")
+
+
+def _first_slice_segment(payload: bytes) -> bool:
+    return len(payload) > 2 and bool(payload[2] & 0x80)
 
 
 def _recover_hevc_annexb_online(

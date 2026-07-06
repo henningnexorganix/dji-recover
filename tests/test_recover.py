@@ -17,6 +17,11 @@ def nal(nal_type: int, body: bytes = b"payload") -> bytes:
     return bytes([header0, header1]) + body
 
 
+def slice_nal(nal_type: int, first_slice: bool, body: bytes = b"payload") -> bytes:
+    flag = b"\x80" if first_slice else b"\x00"
+    return nal(nal_type, flag + body)
+
+
 def length_prefixed(payload: bytes) -> bytes:
     return len(payload).to_bytes(4, "big") + payload
 
@@ -101,6 +106,41 @@ class RecoverTests(unittest.TestCase):
             data = audio.read_bytes()
             self.assertEqual(audio_stats.frames_written, 2)
             self.assertEqual(data.count(b"\xff\xf1"), 2)
+
+    def test_pairs_frame_filter_drops_incomplete_frames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            params = ParameterSets(vps=nal(32), sps=nal(33), pps=nal(34))
+            complete_a = slice_nal(19, True, b"complete-a")
+            complete_b = slice_nal(19, False, b"complete-b")
+            orphan_continuation = slice_nal(1, False, b"orphan-continuation")
+            orphan_first = slice_nal(1, True, b"orphan-first")
+            broken = tmp_path / "broken.mp4"
+            broken.write_bytes(
+                length_prefixed(complete_a)
+                + length_prefixed(complete_b)
+                + length_prefixed(orphan_continuation)
+                + length_prefixed(orphan_first)
+            )
+
+            out = tmp_path / "out.hevc"
+            stats = recover_hevc_annexb(
+                broken,
+                out,
+                params,
+                start_offset=0,
+                max_nal_size=1024,
+                frame_filter="pairs",
+            )
+
+            data = out.read_bytes()
+            self.assertEqual(stats.frames_written, 1)
+            self.assertEqual(stats.frames_dropped, 2)
+            self.assertEqual(stats.nals_written, 2)
+            self.assertIn(b"complete-a", data)
+            self.assertIn(b"complete-b", data)
+            self.assertNotIn(b"orphan-continuation", data)
+            self.assertNotIn(b"orphan-first", data)
 
 
 if __name__ == "__main__":
