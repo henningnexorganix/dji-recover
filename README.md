@@ -140,9 +140,10 @@ dji-recover \
   --timeline preserve
 ```
 
-`clean` re-encodes the recovered HEVC stream and transcodes recovered audio. It
-is slower and may lose one generation of quality, but often creates a friendlier
-file for editors and media players.
+`clean` decodes the recovered HEVC stream, writes H.264 video, and transcodes
+recovered audio. It is slower and loses one generation of quality, but often
+creates a much friendlier file for QuickTime, DaVinci Resolve, and other players
+when the raw recovered HEVC stream is damaged.
 
 ```sh
 dji-recover \
@@ -153,7 +154,7 @@ dji-recover \
 ```
 
 Lower-level video behavior can be overridden with `--mode copy|reencode`.
-`preserve` defaults to `copy`; `clean` defaults to `reencode`.
+`preserve` defaults to HEVC `copy`; `clean` defaults to H.264 `reencode`.
 
 ## Audio Recovery
 

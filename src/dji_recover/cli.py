@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         choices=["copy", "reencode"],
-        help="Video mux mode. Defaults to copy for preserve and reencode for clean.",
+        help="Video mode. Defaults to HEVC copy for preserve and H.264 reencode for clean.",
     )
     parser.add_argument(
         "--audio",
@@ -118,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         mode = args.mode or ("reencode" if args.timeline == "clean" else "copy")
         print(f"Writing MP4 ({args.timeline}/{mode})...", file=sys.stderr)
+        if mode == "copy":
+            print(
+                "Note: preserve/copy keeps damaged HEVC as-is; if players show black video, retry with --timeline clean.",
+                file=sys.stderr,
+            )
         output.parent.mkdir(parents=True, exist_ok=True)
         mux_hevc_to_mp4(hevc_path, output, frame_rate=args.frame_rate, mode=mode, audio=audio)
         print(f"Recovered MP4: {output}", file=sys.stderr)

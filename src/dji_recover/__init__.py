@@ -1,3 +1,3 @@
 """DJI crashed MP4 recovery helpers."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

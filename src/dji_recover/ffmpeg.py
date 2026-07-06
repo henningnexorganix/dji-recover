@@ -70,21 +70,22 @@ def mux_hevc_to_mp4(
     base = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-fflags", "+genpts"]
     if frame_rate:
         base += ["-r", frame_rate]
-    base += ["-i", str(hevc)]
     if mode == "copy":
+        base += ["-i", str(hevc)]
         video_args = ["-c:v", "copy", "-tag:v", "hvc1"]
     elif mode == "reencode":
+        base += ["-err_detect", "ignore_err", "-i", str(hevc)]
         video_args = [
             "-c:v",
-            "libx265",
+            "libx264",
             "-preset",
-            "medium",
+            "veryfast",
             "-crf",
             "18",
             "-pix_fmt",
-            "yuv420p10le",
+            "yuv420p",
             "-tag:v",
-            "hvc1",
+            "avc1",
         ]
     else:
         raise ValueError(f"Unknown mux mode: {mode}")
