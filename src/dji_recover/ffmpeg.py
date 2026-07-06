@@ -44,37 +44,37 @@ def mux_hevc_to_mp4(
     frame_rate: str,
     mode: str,
     audio: Path | None = None,
+    audio_sync: str = "pad",
 ) -> None:
     if audio is not None:
         with tempfile.TemporaryDirectory(prefix="dji-recover-mux-", dir=output.parent) as tmp:
             video_only = Path(tmp) / "video-only.mp4"
             mux_hevc_to_mp4(hevc, video_only, frame_rate=frame_rate, mode=mode, audio=None)
-            run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "warning",
-                    "-i",
-                    str(video_only),
-                    "-i",
-                    str(audio),
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "1:a:0",
-                    "-c:v",
-                    "copy",
-                    "-c:a",
-                    "copy",
-                    "-shortest",
-                    "-movflags",
-                    "+faststart",
-                    str(output),
-                ],
-                quiet=mode == "reencode",
-            )
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "warning",
+                "-i",
+                str(video_only),
+                "-i",
+                str(audio),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "copy",
+            ]
+            if audio_sync == "pad":
+                cmd += ["-af", "apad", "-c:a", "aac", "-b:a", "320k", "-shortest"]
+            elif audio_sync == "shortest":
+                cmd += ["-c:a", "copy", "-shortest"]
+            else:
+                raise ValueError(f"Unknown audio sync mode: {audio_sync}")
+            cmd += ["-movflags", "+faststart", str(output)]
+            run(cmd, quiet=mode == "reencode")
         return
 
     base = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-fflags", "+genpts"]

@@ -199,6 +199,24 @@ dji-recover \
   --audio none
 ```
 
+DJI AAC recovery has two scan modes. The default, `--audio-recovery guess`,
+includes plausible final AAC frames found at the end of DJI video gaps. This
+usually recovers more complete audio, but heavily damaged files may sound bubbly
+if some inferred frames are not really clean AAC. For stricter audio, use:
+
+```sh
+dji-recover \
+  --reference good.MP4 \
+  --broken broken.MP4 \
+  --output recovered-strict-audio.mp4 \
+  --audio-recovery exact
+```
+
+By default, `--audio-sync pad` extends recovered audio with silence when it is a
+little shorter than the recovered video, so the final MP4 has matching stream
+durations. Use `--audio-sync shortest` to trim the output to the shorter stream
+instead.
+
 ## Useful Options
 
 ```text
@@ -212,6 +230,8 @@ dji-recover \
 --frame-filter MODE    auto, none, complete, or pairs
 --audio MODE           auto or none
 --audio-mode MODE      transcode or copy
+--audio-recovery MODE  guess or exact
+--audio-sync MODE      pad or shortest
 --audio-source PATH    External audio file to mux
 --keep-workdir PATH    Keep intermediate files for inspection
 --max-scan BYTES       Auto-detect scan limit, decimal or hex

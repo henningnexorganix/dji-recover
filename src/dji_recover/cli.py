@@ -53,6 +53,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="transcode",
         help="Transcode recovered AAC for compatibility or mux it directly.",
     )
+    parser.add_argument(
+        "--audio-recovery",
+        choices=["guess", "exact"],
+        default="guess",
+        help="guess includes plausible final AAC frames in DJI video gaps; exact keeps only size-confirmed frames.",
+    )
+    parser.add_argument(
+        "--audio-sync",
+        choices=["pad", "shortest"],
+        default="pad",
+        help="pad extends recovered audio with silence to video length; shortest trims output to the shorter stream.",
+    )
     parser.add_argument("--audio-source", type=Path, help="Optional AAC/M4A/WAV file to mux into the recovered MP4")
     parser.add_argument("--keep-workdir", type=Path, help="Keep intermediate files in this directory")
     parser.add_argument("--max-scan", default=None, help="Auto-detect scan limit in bytes, decimal or hex")
@@ -135,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             video_ranges=stats.video_ranges,
             enabled=args.audio == "auto",
             audio_mode=args.audio_mode,
+            audio_recovery=args.audio_recovery,
         )
         mode = args.mode or ("reencode" if args.timeline == "clean" else "copy")
         print(f"Writing MP4 ({args.timeline}/{mode})...", file=sys.stderr)
@@ -144,7 +157,14 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         output.parent.mkdir(parents=True, exist_ok=True)
-        mux_hevc_to_mp4(hevc_path, output, frame_rate=args.frame_rate, mode=mode, audio=audio)
+        mux_hevc_to_mp4(
+            hevc_path,
+            output,
+            frame_rate=args.frame_rate,
+            mode=mode,
+            audio=audio,
+            audio_sync=args.audio_sync,
+        )
         print(f"Recovered MP4: {output}", file=sys.stderr)
         return 0
     except RecoveryError as exc:
@@ -201,6 +221,7 @@ def _resolve_audio(
     video_ranges,
     enabled: bool,
     audio_mode: str,
+    audio_recovery: str,
 ) -> Path | None:
     if not enabled:
         print("Audio disabled.", file=sys.stderr)
@@ -227,14 +248,22 @@ def _resolve_audio(
         video_ranges=video_ranges,
         sample_rate=audio_info["sample_rate"],
         channels=audio_info["channels"],
+        guess_final_frames=audio_recovery == "guess",
     )
     if audio_stats.frames_written > 0:
         print(
             f"Recovered {audio_stats.frames_written} AAC frames "
             f"({audio_stats.duration_seconds:.1f}s); "
+            f"exact_frames={audio_stats.exact_frames}, "
             f"guessed_last_frames={audio_stats.guessed_last_frames}",
             file=sys.stderr,
         )
+        if audio_stats.guessed_ratio >= 0.25:
+            print(
+                "Warning: many recovered AAC frames were inferred from DJI gap boundaries; "
+                "if speech sounds bubbly, retry with --audio-recovery exact.",
+                file=sys.stderr,
+            )
         return _prepare_audio(adts, workdir, audio_mode)
 
     print("No recoverable audio found; continuing with video only.", file=sys.stderr)

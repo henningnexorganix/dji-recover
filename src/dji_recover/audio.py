@@ -37,6 +37,16 @@ class AudioStats:
     def duration_seconds(self) -> float:
         return self.frames_written * 1024 / 48000
 
+    @property
+    def exact_frames(self) -> int:
+        return self.frames_written - self.guessed_last_frames
+
+    @property
+    def guessed_ratio(self) -> float:
+        if self.frames_written == 0:
+            return 0.0
+        return self.guessed_last_frames / self.frames_written
+
 
 def recover_dji_aac_adts(
     broken: Path,
@@ -44,6 +54,7 @@ def recover_dji_aac_adts(
     video_ranges: list[NalRange],
     sample_rate: int = 48000,
     channels: int = 2,
+    guess_final_frames: bool = True,
 ) -> AudioStats:
     if not video_ranges:
         return AudioStats()
@@ -69,7 +80,7 @@ def recover_dji_aac_adts(
 
                 stats.regions_scanned += 1
                 stats.candidate_signatures += len(signatures)
-                frame_ranges = _aac_frame_ranges(signatures, gap_end)
+                frame_ranges = _aac_frame_ranges(signatures, gap_end, guess_final_frames=guess_final_frames)
                 for start, end, guessed in frame_ranges:
                     payload = data[start:end]
                     if not payload.startswith(DJI_AAC_SIGNATURE):
@@ -99,12 +110,19 @@ def _find_signatures(data: mmap.mmap, start: int, end: int) -> list[int]:
     return signatures
 
 
-def _aac_frame_ranges(signatures: list[int], region_end: int) -> list[tuple[int, int, bool]]:
+def _aac_frame_ranges(
+    signatures: list[int],
+    region_end: int,
+    guess_final_frames: bool = True,
+) -> list[tuple[int, int, bool]]:
     ranges: list[tuple[int, int, bool]] = []
     for start, next_start in zip(signatures, signatures[1:]):
         size = next_start - start
         if size in DJI_AAC_FRAME_SIZES:
             ranges.append((start, next_start, False))
+
+    if not guess_final_frames:
+        return ranges
 
     last = signatures[-1]
     guessed_size = _guess_final_frame_size(last, region_end)

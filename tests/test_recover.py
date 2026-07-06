@@ -8,7 +8,7 @@ from dji_recover import __version__
 from dji_recover.cli import main
 from dji_recover.hevc import START_CODE, ParameterSets
 from dji_recover.audio import recover_dji_aac_adts
-from dji_recover.recover import RecoveryError, find_hevc_start, recover_hevc_annexb
+from dji_recover.recover import NalRange, RecoveryError, find_hevc_start, recover_hevc_annexb
 
 
 def nal(nal_type: int, body: bytes = b"payload") -> bytes:
@@ -129,7 +129,47 @@ class RecoverTests(unittest.TestCase):
 
             data = audio.read_bytes()
             self.assertEqual(audio_stats.frames_written, 2)
+            self.assertEqual(audio_stats.exact_frames, 1)
+            self.assertEqual(audio_stats.guessed_last_frames, 1)
             self.assertEqual(data.count(b"\xff\xf1"), 2)
+
+    def test_recover_dji_aac_can_disable_guessed_gap_frames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            first = nal(19, b"first")
+            second = nal(1, b"second")
+            audio_frame_a = b"\x21\x1b\x94" + (b"a" * 843)
+            audio_frame_b = b"\x21\x1b\x94" + (b"b" * 844)
+            broken = tmp_path / "broken.mp4"
+            broken.write_bytes(
+                length_prefixed(first)
+                + audio_frame_a
+                + audio_frame_b
+                + b"\x00\x00\x00\x00"
+                + length_prefixed(second)
+            )
+
+            audio = tmp_path / "out.aac"
+            first_end = len(length_prefixed(first))
+            second_start = len(broken.read_bytes()) - len(length_prefixed(second))
+            second_end = len(broken.read_bytes())
+            video_ranges = [
+                NalRange(offset=0, payload_start=4, payload_end=first_end, nal_size=len(first), nal_type=19),
+                NalRange(
+                    offset=second_start,
+                    payload_start=second_start + 4,
+                    payload_end=second_end,
+                    nal_size=len(second),
+                    nal_type=1,
+                ),
+            ]
+            audio_stats = recover_dji_aac_adts(broken, audio, video_ranges, guess_final_frames=False)
+
+            data = audio.read_bytes()
+            self.assertEqual(audio_stats.frames_written, 1)
+            self.assertEqual(audio_stats.exact_frames, 1)
+            self.assertEqual(audio_stats.guessed_last_frames, 0)
+            self.assertEqual(data.count(b"\xff\xf1"), 1)
 
     def test_pairs_frame_filter_drops_incomplete_frames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
