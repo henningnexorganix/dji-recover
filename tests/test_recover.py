@@ -1,7 +1,11 @@
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 import tempfile
 import unittest
 
+from dji_recover import __version__
+from dji_recover.cli import main
 from dji_recover.hevc import START_CODE, ParameterSets
 from dji_recover.audio import recover_dji_aac_adts
 from dji_recover.recover import find_hevc_start, recover_hevc_annexb
@@ -18,6 +22,14 @@ def length_prefixed(payload: bytes) -> bytes:
 
 
 class RecoverTests(unittest.TestCase):
+    def test_cli_version(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+            main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"dji-recover {__version__}")
+
     def test_recover_resyncs_after_bad_word(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

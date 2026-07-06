@@ -6,6 +6,7 @@ import shutil
 import sys
 import tempfile
 
+from . import __version__
 from .audio import recover_dji_aac_adts
 from .ffmpeg import ffprobe_json, mux_hevc_to_mp4, transcode_audio_to_m4a, try_extract_audio
 from .hevc import extract_parameter_sets
@@ -17,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="dji-recover",
         description="Recover HEVC video from DJI MP4 files with a missing moov atom.",
     )
+    parser.add_argument("--version", action="version", version=f"dji-recover {__version__}")
     parser.add_argument("--reference", required=True, type=Path, help="Known-good MP4 from the same camera/settings")
     parser.add_argument("--broken", required=True, type=Path, help="Broken MP4 file to recover")
     parser.add_argument("--output", required=True, type=Path, help="Recovered MP4 output path")
@@ -54,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    print(f"dji-recover {__version__}", file=sys.stderr)
     reference = args.reference.expanduser().resolve()
     broken = args.broken.expanduser().resolve()
     output = args.output.expanduser().resolve()
