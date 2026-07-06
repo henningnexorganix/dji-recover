@@ -4,7 +4,17 @@ from dataclasses import dataclass, field
 import mmap
 from pathlib import Path
 
-from .hevc import HEVC_AUD, PARAMETER_SET_TYPES, START_CODE, ParameterSets, hevc_nal_type, looks_like_hevc_nal
+from .hevc import (
+    HEVC_AUD,
+    PARAMETER_SET_TYPES,
+    START_CODE,
+    ParameterSets,
+    parse_pps_info,
+    parse_slice_info,
+    parse_sps_info,
+    hevc_nal_type,
+    looks_like_hevc_nal,
+)
 
 DJI_HEVC_TYPES = {1, 19, 20, 32, 33, 34}
 DJI_SLICE_HEADERS = {b"\x02\x01", b"\x26\x01", b"\x28\x01"}
@@ -166,6 +176,9 @@ def _recover_hevc_annexb_indexed(
     frame: list[tuple[NalRange, bytes]] = []
     accepting_frames = gop_start != "next-idr"
     idr_frames_seen = 0
+    slice_header_context = None
+    if frame_filter == "header-pairs":
+        slice_header_context = _slice_header_context(parameter_sets)
     with broken.open("rb") as src, output_hevc.open("wb") as dst:
         try:
             data = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
@@ -178,7 +191,7 @@ def _recover_hevc_annexb_indexed(
                 nonlocal frame
                 if not frame:
                     return
-                if _keep_frame(frame, frame_filter):
+                if _keep_frame(frame, frame_filter, slice_header_context):
                     _write_frame(dst, frame, stats, insert_aud=insert_aud)
                 else:
                     stats.frames_dropped += 1
@@ -224,7 +237,7 @@ def _recover_hevc_annexb_indexed(
                             continue
                         frame.append((nal_range, payload))
                     elif frame:
-                        if frame_filter == "pairs" and len(frame) >= 2:
+                        if frame_filter in {"pairs", "header-pairs"} and len(frame) >= 2:
                             flush_frame()
                             stats.frames_dropped += 1
                         else:
@@ -258,7 +271,7 @@ def _write_frame(
     stats.frames_written += 1
 
 
-def _keep_frame(frame: list[tuple[NalRange, bytes]], frame_filter: str) -> bool:
+def _keep_frame(frame: list[tuple[NalRange, bytes]], frame_filter: str, slice_header_context=None) -> bool:
     if frame_filter == "none":
         return True
     if not frame or not _first_slice_segment(frame[0][1]):
@@ -267,6 +280,8 @@ def _keep_frame(frame: list[tuple[NalRange, bytes]], frame_filter: str) -> bool:
         return False
     if frame_filter == "pairs":
         return len(frame) == 2
+    if frame_filter == "header-pairs":
+        return len(frame) == 2 and _matching_slice_headers(frame, slice_header_context)
     if frame_filter == "complete":
         return True
     raise ValueError(f"Unknown frame filter: {frame_filter}")
@@ -274,6 +289,33 @@ def _keep_frame(frame: list[tuple[NalRange, bytes]], frame_filter: str) -> bool:
 
 def _first_slice_segment(payload: bytes) -> bool:
     return len(payload) > 2 and bool(payload[2] & 0x80)
+
+
+def _slice_header_context(parameter_sets: ParameterSets):
+    sps_info = parse_sps_info(parameter_sets.sps)
+    pps_info = parse_pps_info(parameter_sets.pps)
+    return sps_info, {pps_info.pps_id: pps_info}
+
+
+def _matching_slice_headers(frame: list[tuple[NalRange, bytes]], slice_header_context) -> bool:
+    if slice_header_context is None:
+        return False
+    sps_info, pps_by_id = slice_header_context
+    try:
+        first = parse_slice_info(frame[0][1], sps_info, pps_by_id)
+        second = parse_slice_info(frame[1][1], sps_info, pps_by_id)
+    except (KeyError, ValueError):
+        return False
+
+    if not first.first_slice_segment or second.first_slice_segment:
+        return False
+    if first.pps_id != second.pps_id:
+        return False
+    if first.slice_segment_address != 0 or second.slice_segment_address <= 0:
+        return False
+    if first.poc_lsb is not None and second.poc_lsb is not None and first.poc_lsb != second.poc_lsb:
+        return False
+    return True
 
 
 def _file_size(path: Path) -> int:

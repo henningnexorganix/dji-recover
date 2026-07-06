@@ -158,6 +158,8 @@ dji-recover \
 Lower-level video behavior can be overridden with `--mode copy|reencode`.
 `preserve` defaults to HEVC `copy`; `clean` defaults to H.264 `reencode`.
 The access-unit filter can be overridden with `--frame-filter auto|none|complete|pairs`.
+`--frame-filter header-pairs` additionally checks parsed HEVC slice headers
+before accepting a two-slice frame.
 For badly damaged streams, `--hevc-aud on` inserts HEVC access-unit delimiters
 before recovered frames, and `--gop-start next-idr` skips the first detected GOP
 and starts at the next IDR frame.
@@ -231,7 +233,7 @@ output to the shorter stream instead.
 --frame-rate RATE      Frame rate for raw HEVC timestamps
 --timeline MODE        preserve or clean
 --mode MODE            copy or reencode
---frame-filter MODE    auto, none, complete, or pairs
+--frame-filter MODE    auto, none, complete, pairs, or header-pairs
 --hevc-aud MODE        auto, on, or off
 --gop-start MODE       first or next-idr
 --audio MODE           auto or none

@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frame-filter",
-        choices=["auto", "none", "complete", "pairs"],
+        choices=["auto", "none", "complete", "pairs", "header-pairs"],
         default="auto",
         help="Filter recovered HEVC access units. auto uses pairs for clean and none for preserve.",
     )

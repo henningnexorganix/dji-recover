@@ -6,7 +6,7 @@ import unittest
 
 from dji_recover import __version__
 from dji_recover.cli import main
-from dji_recover.hevc import HEVC_AUD, START_CODE, ParameterSets
+from dji_recover.hevc import HEVC_AUD, START_CODE, ParameterSets, PpsInfo, SpsInfo, parse_slice_info
 from dji_recover.audio import recover_dji_aac_adts
 from dji_recover.recover import NalRange, RecoveryError, find_hevc_start, recover_hevc_annexb
 
@@ -24,6 +24,18 @@ def slice_nal(nal_type: int, first_slice: bool, body: bytes = b"payload") -> byt
 
 def length_prefixed(payload: bytes) -> bytes:
     return len(payload).to_bytes(4, "big") + payload
+
+
+def bits_to_bytes(bits: str) -> bytes:
+    padding = (8 - len(bits) % 8) % 8
+    bits += "0" * padding
+    return bytes(int(bits[i : i + 8], 2) for i in range(0, len(bits), 8))
+
+
+def ue_bits(value: int) -> str:
+    code_num = value + 1
+    binary = format(code_num, "b")
+    return "0" * (len(binary) - 1) + binary
 
 
 class RecoverTests(unittest.TestCase):
@@ -230,6 +242,31 @@ class RecoverTests(unittest.TestCase):
             data = out.read_bytes()
             self.assertEqual(stats.frames_written, 2)
             self.assertEqual(data.count(START_CODE + HEVC_AUD), 2)
+
+    def test_parse_slice_info_reads_poc_and_slice_address(self) -> None:
+        sps = SpsInfo(log2_max_pic_order_cnt_lsb=8, slice_segment_address_bits=12)
+        pps = PpsInfo(
+            pps_id=0,
+            sps_id=0,
+            dependent_slice_segments_enabled=False,
+            output_flag_present=False,
+            num_extra_slice_header_bits=0,
+        )
+        first_payload = nal(1, bits_to_bytes("1" + ue_bits(0) + ue_bits(1) + format(37, "08b")))
+        second_payload = nal(
+            1,
+            bits_to_bytes("0" + ue_bits(0) + format(42, "012b") + ue_bits(1) + format(37, "08b")),
+        )
+
+        first = parse_slice_info(first_payload, sps, {0: pps})
+        second = parse_slice_info(second_payload, sps, {0: pps})
+
+        self.assertTrue(first.first_slice_segment)
+        self.assertEqual(first.slice_segment_address, 0)
+        self.assertEqual(first.poc_lsb, 37)
+        self.assertFalse(second.first_slice_segment)
+        self.assertEqual(second.slice_segment_address, 42)
+        self.assertEqual(second.poc_lsb, 37)
 
     def test_recover_can_skip_to_next_idr_gop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
