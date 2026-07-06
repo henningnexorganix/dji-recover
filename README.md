@@ -52,7 +52,41 @@ brew install ffmpeg
 
 ## Install
 
-From a local checkout:
+For normal use, install `dji-recover` with `pipx`. This gives you a regular
+`dji-recover` command without activating a virtual environment manually.
+
+```sh
+brew install pipx
+pipx ensurepath
+pipx install git+https://github.com/henningnexorganix/dji-recover.git
+```
+
+Restart your shell if `pipx ensurepath` asks you to. After installation, the CLI
+is available as:
+
+```sh
+dji-recover --help
+```
+
+The command is `dji-recover`, not `dji-recovery`. If your shell says
+`command not found`, check that `pipx` put its command directory on your `PATH`:
+
+```sh
+pipx ensurepath
+which dji-recover
+dji-recover --help
+```
+
+To upgrade or remove the installed command later:
+
+```sh
+pipx upgrade dji-recover
+pipx uninstall dji-recover
+```
+
+### Developer Install
+
+For local development, use an editable install in a project virtual environment:
 
 ```sh
 python3.13 -m venv .venv
@@ -61,22 +95,7 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-After installation, the CLI is available as:
-
-```sh
-dji-recover --help
-```
-
-The command is `dji-recover`, not `dji-recovery`. If your shell says
-`command not found`, check that the virtual environment is active:
-
-```sh
-source .venv/bin/activate
-which dji-recover
-dji-recover --help
-```
-
-You can also run it directly from the source tree:
+You can also run the source tree directly:
 
 ```sh
 PYTHONPATH=src python3 -m dji_recover --help
