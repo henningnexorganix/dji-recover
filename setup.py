@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="dji-recover",
-    version="0.2.0",
+    version="0.2.1",
     description="Recover HEVC video from crashed DJI MP4 files that are missing a moov atom.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",

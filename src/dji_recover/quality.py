@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 
@@ -14,6 +15,13 @@ class GopSample:
     green_ratio: float
     dark_ratio: float
     sample_path: str | None = None
+
+
+@dataclass(frozen=True)
+class DropInterval:
+    start: float
+    end: float
+    green_ratio: float
 
 
 def inspect_gops(
@@ -50,21 +58,135 @@ def inspect_gops(
             )
         )
 
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(
-        json.dumps(
-            {
-                "video": str(video),
-                "sample_width": width,
-                "sample_height": height,
-                "samples": [asdict(sample) for sample in samples],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    _write_report(video, report, width, height, samples, sample_mode="keyframe")
     return samples
+
+
+def inspect_time_samples(
+    video: Path,
+    report: Path,
+    samples_dir: Path | None = None,
+    interval: float = 1.0,
+    width: int = 320,
+    height: int = 180,
+) -> list[GopSample]:
+    duration = video_duration(video)
+    if samples_dir is not None:
+        samples_dir.mkdir(parents=True, exist_ok=True)
+
+    samples: list[GopSample] = []
+    time_seconds = 0.0
+    index = 0
+    while time_seconds < duration:
+        rgb = _extract_rgb_frame(video, time_seconds, width, height)
+        sample_path = None
+        if samples_dir is not None:
+            sample_path = str(samples_dir / f"time-{index:04d}-{time_seconds:010.3f}.jpg")
+            _extract_jpeg_frame(video, time_seconds, Path(sample_path))
+        samples.append(
+            GopSample(
+                index=index,
+                time_seconds=time_seconds,
+                pict_type="time",
+                green_ratio=_green_ratio(rgb),
+                dark_ratio=_dark_ratio(rgb),
+                sample_path=sample_path,
+            )
+        )
+        index += 1
+        time_seconds += max(0.1, interval)
+
+    _write_report(video, report, width, height, samples, sample_mode="time")
+    return samples
+
+
+def bad_gop_intervals(
+    samples: list[GopSample],
+    video_duration: float,
+    green_threshold: float,
+) -> list[DropInterval]:
+    intervals: list[DropInterval] = []
+    ordered = sorted(samples, key=lambda sample: sample.time_seconds)
+    for index, sample in enumerate(ordered):
+        if sample.green_ratio < green_threshold:
+            continue
+        end = ordered[index + 1].time_seconds if index + 1 < len(ordered) else video_duration
+        if end > sample.time_seconds:
+            intervals.append(DropInterval(sample.time_seconds, end, sample.green_ratio))
+    return intervals
+
+
+def drop_intervals(
+    source: Path,
+    output: Path,
+    intervals: list[DropInterval],
+    frame_rate: str,
+) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if not intervals:
+        if source.resolve() != output.resolve():
+            shutil.copyfile(source, output)
+        return
+
+    video_select = _keep_expression(intervals)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-vf",
+        f"select='{video_select}',setpts=N/({frame_rate})/TB",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-tag:v",
+        "avc1",
+    ]
+
+    if _has_audio(source):
+        audio_select = _keep_expression(intervals)
+        cmd += [
+            "-map",
+            "0:a:0",
+            "-af",
+            f"aselect='{audio_select}',asetpts=N/SR/TB",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "320k",
+        ]
+
+    cmd += ["-movflags", "+faststart", str(output)]
+    subprocess.run(cmd, check=True)
+
+
+def video_duration(video: Path) -> float:
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            str(video),
+        ],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    return float(result.stdout.strip())
 
 
 def _keyframes(video: Path) -> list[dict]:
@@ -94,6 +216,57 @@ def _keyframes(video: Path) -> list[dict]:
         for frame in data.get("frames", [])
         if frame.get("best_effort_timestamp_time") is not None
     ]
+
+
+def _write_report(
+    video: Path,
+    report: Path,
+    width: int,
+    height: int,
+    samples: list[GopSample],
+    sample_mode: str,
+) -> None:
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(
+        json.dumps(
+            {
+                "video": str(video),
+                "sample_mode": sample_mode,
+                "sample_width": width,
+                "sample_height": height,
+                "samples": [asdict(sample) for sample in samples],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _has_audio(video: Path) -> bool:
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+            str(video),
+        ],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    return bool(result.stdout.strip())
+
+
+def _keep_expression(intervals: list[DropInterval]) -> str:
+    drops = "+".join(f"between(t,{interval.start:.6f},{interval.end:.6f})" for interval in intervals)
+    return f"not({drops})"
 
 
 def _extract_rgb_frame(video: Path, time_seconds: float, width: int, height: int) -> bytes:

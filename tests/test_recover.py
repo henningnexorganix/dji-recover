@@ -7,7 +7,7 @@ import unittest
 from dji_recover import __version__
 from dji_recover.cli import main
 from dji_recover.hevc import HEVC_AUD, START_CODE, ParameterSets, PpsInfo, SpsInfo, parse_slice_info
-from dji_recover.quality import _dark_ratio, _green_ratio
+from dji_recover.quality import GopSample, _dark_ratio, _green_ratio, bad_gop_intervals
 from dji_recover.audio import recover_dji_aac_adts
 from dji_recover.recover import NalRange, RecoveryError, find_hevc_start, recover_hevc_annexb
 
@@ -286,6 +286,20 @@ class RecoverTests(unittest.TestCase):
 
         self.assertAlmostEqual(_green_ratio(rgb), 1 / 3)
         self.assertAlmostEqual(_dark_ratio(rgb), 1 / 3)
+
+    def test_bad_gop_intervals_use_next_keyframe_as_end(self) -> None:
+        samples = [
+            GopSample(0, 0.0, "I", 0.01, 0.0),
+            GopSample(1, 2.0, "I", 0.10, 0.0),
+            GopSample(2, 5.0, "I", 0.02, 0.0),
+            GopSample(3, 9.0, "I", 0.20, 0.0),
+        ]
+
+        intervals = bad_gop_intervals(samples, video_duration=12.0, green_threshold=0.06)
+
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual((intervals[0].start, intervals[0].end), (2.0, 5.0))
+        self.assertEqual((intervals[1].start, intervals[1].end), (9.0, 12.0))
 
     def test_recover_can_skip_to_next_idr_gop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

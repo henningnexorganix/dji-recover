@@ -176,6 +176,19 @@ dji-recover \
   --gop-samples-dir gop-samples
 ```
 
+To prefer jumps over long green/blocky stretches, experimentally drop GOPs whose
+keyframe sample exceeds a green-pixel threshold:
+
+```sh
+dji-recover \
+  --reference good.MP4 \
+  --broken broken.MP4 \
+  --output recovered-dropped.mp4 \
+  --timeline clean \
+  --drop-bad-gops \
+  --bad-gop-green-threshold 0.06
+```
+
 ## Audio Recovery
 
 Audio recovery is best effort.
@@ -250,6 +263,11 @@ output to the shorter stream instead.
 --gop-start MODE       first or next-idr
 --gop-report PATH      Write a JSON quality report for recovered GOP starts
 --gop-samples-dir PATH Save JPEG keyframe samples for the GOP report
+--drop-bad-gops        Experimentally remove sampled green/blocky intervals
+--bad-gop-green-threshold N
+                       Green ratio threshold for --drop-bad-gops
+--quality-sample-interval N
+                       Seconds between quality samples for --drop-bad-gops
 --audio MODE           auto or none
 --audio-mode MODE      transcode or copy
 --audio-recovery MODE  guess or exact

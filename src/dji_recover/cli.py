@@ -10,7 +10,7 @@ from . import __version__
 from .audio import recover_dji_aac_adts
 from .ffmpeg import ffprobe_json, mux_hevc_to_mp4, transcode_audio_to_m4a, try_extract_audio
 from .hevc import extract_parameter_sets
-from .quality import inspect_gops
+from .quality import bad_gop_intervals, drop_intervals, inspect_gops, inspect_time_samples, video_duration
 from .recover import RecoveryError, parse_offset, recover_hevc_annexb
 
 
@@ -82,6 +82,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-workdir", type=Path, help="Keep intermediate files in this directory")
     parser.add_argument("--gop-report", type=Path, help="Write a JSON quality report for recovered keyframes/GOP starts")
     parser.add_argument("--gop-samples-dir", type=Path, help="Directory for JPEG samples referenced by --gop-report")
+    parser.add_argument(
+        "--drop-bad-gops",
+        action="store_true",
+        help="Experimentally remove intervals whose sampled green ratio exceeds the threshold.",
+    )
+    parser.add_argument(
+        "--bad-gop-green-threshold",
+        type=float,
+        default=0.06,
+        help="Green-pixel ratio threshold for --drop-bad-gops.",
+    )
+    parser.add_argument(
+        "--quality-sample-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between quality samples used by --drop-bad-gops.",
+    )
     parser.add_argument(
         "--gop-report-limit",
         type=int,
@@ -185,16 +202,42 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         output.parent.mkdir(parents=True, exist_ok=True)
+        mux_output = output
+        if args.drop_bad_gops:
+            mux_output = workdir / "pre-drop-output.mp4"
         mux_hevc_to_mp4(
             hevc_path,
-            output,
+            mux_output,
             frame_rate=args.frame_rate,
             mode=mode,
             audio=audio,
             audio_sync=args.audio_sync,
         )
+        if args.drop_bad_gops:
+            print("Inspecting GOPs for experimental dropping...", file=sys.stderr)
+            drop_report = args.gop_report.expanduser().resolve() if args.gop_report else workdir / "gop-report.json"
+            samples_dir = args.gop_samples_dir.expanduser().resolve() if args.gop_samples_dir else None
+            samples = inspect_time_samples(
+                mux_output,
+                drop_report,
+                samples_dir=samples_dir,
+                interval=max(0.1, args.quality_sample_interval),
+            )
+            intervals = bad_gop_intervals(
+                samples,
+                video_duration(mux_output),
+                green_threshold=max(0.0, args.bad_gop_green_threshold),
+            )
+            total_drop = sum(interval.end - interval.start for interval in intervals)
+            print(
+                f"Dropping {len(intervals)} bad quality intervals "
+                f"({total_drop:.2f}s) with green_ratio >= {args.bad_gop_green_threshold:.1%}.",
+                file=sys.stderr,
+            )
+            drop_intervals(mux_output, output, intervals, frame_rate=args.frame_rate)
+            print(f"GOP quality report: {drop_report}", file=sys.stderr)
         print(f"Recovered MP4: {output}", file=sys.stderr)
-        if args.gop_report:
+        if args.gop_report and not args.drop_bad_gops:
             report = args.gop_report.expanduser().resolve()
             samples_dir = args.gop_samples_dir.expanduser().resolve() if args.gop_samples_dir else None
             print("Inspecting recovered GOP/keyframe quality...", file=sys.stderr)
