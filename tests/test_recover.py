@@ -53,6 +53,17 @@ class RecoverTests(unittest.TestCase):
 
             self.assertEqual(find_hevc_start(broken, max_scan=None, max_nal_size=1024), len(prefix))
 
+    def test_find_hevc_start_with_interleaved_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            units = [nal(19, b"one"), nal(1, b"two"), nal(1, b"three"), nal(1, b"four")]
+            broken = tmp_path / "broken.mp4"
+            prefix = b"x" * 321
+            gap = b"\x21\x1b\x94" + (b"a" * 200)
+            broken.write_bytes(prefix + gap.join(length_prefixed(unit) for unit in units))
+
+            self.assertEqual(find_hevc_start(broken, max_scan=None, max_nal_size=1024), len(prefix))
+
     def test_recover_dji_aac_from_video_gaps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

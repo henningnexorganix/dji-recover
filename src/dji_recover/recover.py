@@ -42,6 +42,10 @@ def parse_offset(value: str | int | None) -> int | None:
 def find_hevc_start(path: Path, max_scan: int | None, max_nal_size: int) -> int:
     size = path.stat().st_size
     limit = min(size, max_scan) if max_scan else size
+    indexed_start = _find_indexed_hevc_start(path, limit, max_nal_size, min_count=4)
+    if indexed_start is not None:
+        return indexed_start
+
     with path.open("rb") as handle:
         window = bytearray()
         window_offset = 0
@@ -66,6 +70,43 @@ def find_hevc_start(path: Path, max_scan: int | None, max_nal_size: int) -> int:
                 window_offset += drop
                 del window[:drop]
     raise RuntimeError("Could not find a plausible HEVC length-prefixed stream in the broken file")
+
+
+def _find_indexed_hevc_start(path: Path, limit: int, max_nal_size: int, min_count: int) -> int | None:
+    max_gap = max(2 * 1024 * 1024, max_nal_size * 4)
+    with path.open("rb") as handle:
+        data = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            search_limit = min(limit, len(data))
+            pos = 4
+            cluster_start: int | None = None
+            cluster_count = 0
+            previous_end: int | None = None
+
+            while pos < search_limit - 6:
+                hit = _find_next_slice_header(data, pos, end=search_limit)
+                if hit is None:
+                    break
+                candidate = hit - 4
+                pos = hit + 1
+
+                nal_range = _valid_dji_nal_range(data, candidate, max_nal_size)
+                if nal_range is None:
+                    continue
+
+                if previous_end is None or candidate < previous_end or candidate - previous_end > max_gap:
+                    cluster_start = candidate
+                    cluster_count = 1
+                else:
+                    cluster_count += 1
+
+                previous_end = nal_range.payload_end
+                if cluster_start is not None and cluster_count >= min_count:
+                    return cluster_start
+        finally:
+            data.close()
+
+    return None
 
 
 def recover_hevc_annexb(
@@ -107,18 +148,14 @@ def _recover_hevc_annexb_indexed(
                 if candidate < start_offset or candidate < last_end:
                     continue
 
-                nal_size = int.from_bytes(data[candidate:hit], "big")
-                payload_end = hit + nal_size
-                if not (0 < nal_size <= max_nal_size) or payload_end > file_size:
+                nal_range = _valid_dji_nal_range(data, candidate, max_nal_size)
+                if nal_range is None:
                     stats.invalid_words += 1
                     continue
-
-                payload = data[hit:payload_end]
-                if not _looks_like_dji_hevc_nal(payload[:2]) or _contains_start_code(payload):
-                    stats.invalid_words += 1
-                    continue
-
-                nal_type = hevc_nal_type(payload)
+                nal_size = nal_range.nal_size
+                payload_end = nal_range.payload_end
+                payload = data[nal_range.payload_start:payload_end]
+                nal_type = nal_range.nal_type
                 if nal_type in PARAMETER_SET_TYPES:
                     stats.parameter_sets_skipped += 1
                     last_end = payload_end
@@ -133,7 +170,7 @@ def _recover_hevc_annexb_indexed(
                 stats.video_ranges.append(
                     NalRange(
                         offset=candidate,
-                        payload_start=hit,
+                        payload_start=nal_range.payload_start,
                         payload_end=payload_end,
                         nal_size=nal_size,
                         nal_type=nal_type,
@@ -221,9 +258,34 @@ def _recover_hevc_annexb_online(
     return stats
 
 
-def _find_next_slice_header(data: mmap.mmap, start: int) -> int | None:
-    hits = [idx for header in DJI_SLICE_HEADERS if (idx := data.find(header, start)) != -1]
+def _find_next_slice_header(data: mmap.mmap, start: int, end: int | None = None) -> int | None:
+    if end is None:
+        hits = [idx for header in DJI_SLICE_HEADERS if (idx := data.find(header, start)) != -1]
+    else:
+        hits = [idx for header in DJI_SLICE_HEADERS if (idx := data.find(header, start, end)) != -1]
     return min(hits) if hits else None
+
+
+def _valid_dji_nal_range(data: mmap.mmap, candidate: int, max_nal_size: int) -> NalRange | None:
+    if candidate < 0 or candidate + 6 > len(data):
+        return None
+    payload_start = candidate + 4
+    nal_size = int.from_bytes(data[candidate:payload_start], "big")
+    payload_end = payload_start + nal_size
+    if not (0 < nal_size <= max_nal_size) or payload_end > len(data):
+        return None
+
+    payload = data[payload_start:payload_end]
+    if not _looks_like_dji_hevc_nal(payload[:2]) or _contains_start_code(payload):
+        return None
+
+    return NalRange(
+        offset=candidate,
+        payload_start=payload_start,
+        payload_end=payload_end,
+        nal_size=nal_size,
+        nal_type=hevc_nal_type(payload),
+    )
 
 
 def _valid_chain_in_buffer(buffer: bytes | bytearray, offset: int, max_nal_size: int, min_count: int) -> bool:
